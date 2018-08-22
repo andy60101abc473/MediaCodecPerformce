@@ -1,15 +1,45 @@
 package com.example.lai.decodetest;
 
+import android.annotation.SuppressLint;
 import android.util.Log;
+
+import java.util.HashMap;
 
 public class Debug {
     public static class TimeTravel {
-        private static String tag = "TimeTravel";
         private static boolean enable = true;
+        private static boolean enableAvg = true;
+
+        private static String tag = "TimeTravel";
         private static int assignedIndex = 0;
         public int index;
         public long timeTravel;
         public long record;
+
+        private static class TT_AVG {
+            private static int sampleNum = 500;
+            private int mSum = 0;
+            private int count = 0;
+
+            public void addTimeTravel(String name, long timeTravel) {
+                mSum += timeTravel;
+                count++;
+                if(count == sampleNum) {
+                    int avg = getAverage();
+                    if(TimeTravel.enableAvg) {
+                        Log.d(tag, name + " average costs: " + avg + " msec");
+                    }
+                }
+            }
+            private int getAverage() {
+                int avg = (int)((float)mSum / (float)count + 0.5f);
+                mSum = 0;
+                count = 0;
+                return avg;
+            }
+        }
+        @SuppressLint("UseSparseArrays")
+        private static HashMap<String, TT_AVG> mMap = new HashMap<>();
 
         public TimeTravel() {
             index = assignedIndex++;
@@ -27,9 +57,16 @@ public class Debug {
         public void stamp(String name) {
             long now = System.currentTimeMillis() % 1000000000L;
             long dif = now - record;
-            if(enable) Log.d(tag, "ID: " + index + ", " + name + " costs: " + dif + " msec");
+            if(enable) Log.d(tag, "ID: " + index + ", To " + name + " costs: " + dif + " msec");
             timeTravel += dif;
             record = now;
+
+            TT_AVG avg = mMap.get(name);
+            if(avg == null) {
+                avg = new TT_AVG();
+                mMap.put(name, avg);
+            }
+            avg.addTimeTravel(name, dif);
         }
 
         public void showTotalTime() {

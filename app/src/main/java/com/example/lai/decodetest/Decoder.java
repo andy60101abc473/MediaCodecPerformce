@@ -1,5 +1,6 @@
 package com.example.lai.decodetest;
 
+import android.annotation.SuppressLint;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -28,6 +29,7 @@ public class Decoder {
             for (int i = 0; i < mExtractor.getTrackCount(); i++) {
                 MediaFormat format = mExtractor.getTrackFormat(i);
                 String mime = format.getString(MediaFormat.KEY_MIME);
+                Log.d(tag, "Decoder type: " + mime);
                 if (mime.startsWith("video/")) {
                     mExtractor.selectTrack(i);
                     mMeidaCodec = MediaCodec.createDecoderByType(mime);
@@ -65,7 +67,7 @@ public class Decoder {
     }
 
     public int queueFrame(Debug.TimeTravel timeTravel) {
-        int inputBufferIndex = mMeidaCodec.dequeueInputBuffer(1000000);
+        int inputBufferIndex = mMeidaCodec.dequeueInputBuffer(16000);
         if (inputBufferIndex >= 0) {
             ByteBuffer inputBuffer = mMeidaCodec.getInputBuffer(inputBufferIndex);
             inputBuffer.clear();
@@ -74,7 +76,7 @@ public class Decoder {
                 long sampleTime = mExtractor.getSampleTime();
                 mMeidaCodec.queueInputBuffer(inputBufferIndex, 0, sampleSize, sampleTime, 0);
                 mExtractor.advance();
-                timeTravel.stamp("Queue frame");
+                timeTravel.stamp("queue frame");
                 mMap.put(sampleTime, timeTravel);
             } else {
                 mMeidaCodec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
@@ -84,7 +86,7 @@ public class Decoder {
     }
 
     public int decodeFrame() {
-        int outputBufferIndex = mMeidaCodec.dequeueOutputBuffer(mInfo, 1000000);
+        int outputBufferIndex = mMeidaCodec.dequeueOutputBuffer(mInfo, 16000);
         switch (outputBufferIndex) {
             case MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED:
                 //Log.d(tag, "output index: INFO_OUTPUT_BUFFERS_CHANGED");
@@ -98,7 +100,7 @@ public class Decoder {
             default:
                 mMeidaCodec.releaseOutputBuffer(outputBufferIndex, true);
                 Debug.TimeTravel timeTravel = mMap.remove(mInfo.presentationTimeUs);
-                timeTravel.stamp("Decode frame");
+                timeTravel.stamp("decode done");
                 timeTravel.showTotalTime();
                 break;
         }
@@ -111,10 +113,57 @@ public class Decoder {
         return outputBufferIndex;
     }
 
+    public int hardwareDecode(Debug.TimeTravel timeTravel) {
+        int inputBufferIndex = mMeidaCodec.dequeueInputBuffer(1000000);
+        if (inputBufferIndex >= 0) {
+            ByteBuffer inputBuffer = mMeidaCodec.getInputBuffer(inputBufferIndex);
+            inputBuffer.clear();
+            int sampleSize = mExtractor.readSampleData(inputBuffer, 0);
+            if(sampleSize > 0) {
+                long sampleTime = mExtractor.getSampleTime();
+                mMeidaCodec.queueInputBuffer(inputBufferIndex, 0, sampleSize, sampleTime, 0);
+                mExtractor.advance();
+                timeTravel.stamp("queue frame");
+                mMap.put(sampleTime, timeTravel);
+            } else {
+                mMeidaCodec.queueInputBuffer(inputBufferIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+            }
+
+            int outputBufferIndex = mMeidaCodec.dequeueOutputBuffer(mInfo, 1000000);
+            switch (outputBufferIndex) {
+                case MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED:
+                    //Log.d(tag, "output index: INFO_OUTPUT_BUFFERS_CHANGED");
+                    break;
+                case MediaCodec.INFO_OUTPUT_FORMAT_CHANGED:
+                    //Log.d(tag, "output index: INFO_OUTPUT_FORMAT_CHANGED");
+                    break;
+                case MediaCodec.INFO_TRY_AGAIN_LATER:
+                    //Log.d(tag, "output index: INFO_TRY_AGAIN_LATER");
+                    break;
+                default:
+                    mMeidaCodec.releaseOutputBuffer(outputBufferIndex, true);
+                    Debug.TimeTravel timeTravel2 = mMap.remove(mInfo.presentationTimeUs);
+                    timeTravel2.stamp("decode done");
+                    timeTravel2.showTotalTime();
+                    break;
+            }
+
+            if ((mInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                Log.d(tag, "OutputBuffer BUFFER_FLAG_END_OF_STREAM");
+                running = false;
+            }
+
+            return outputBufferIndex;
+        }
+
+        return inputBufferIndex;
+    }
+
     private Runnable mHardwareDecode = new Runnable() {
+        @SuppressLint("UseSparseArrays")
         @Override
         public void run() {
-            mMap = new HashMap<Long, Debug.TimeTravel>();
+            mMap = new HashMap<>();
             while(running) {
                 Debug.TimeTravel timeTravel = new Debug.TimeTravel();
                 int queueStatus = queueFrame(timeTravel);
